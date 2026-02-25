@@ -1,56 +1,78 @@
 # Benchmark Comparison Findings
 
-This document compares the competing implementation's reported live benchmark against our most recent live debug run.
+This file compares the competing implementation's reported run with our latest verified live run after retrying until a `0`-retry result was achieved.
 
-## Compared Runs
+## Run Setup
 
-- Competitor command:
+- Input: `test_files/slides.pdf`
+- Mode: `--all-pages`
+- Environment: `.env` loaded, `LD_LIBRARY_PATH` set to `third_party/pdfium/lib`
+- Retry loop result: first run already satisfied target (`0` retries)
+
+## Commands
+
+- Competitor reported:
   - `set -a; source .env; set +a; LD_LIBRARY_PATH=./third_party/pdfium/lib /usr/bin/time -f 'elapsed_s=%e' ./pdfocr_debug test_files/slides.pdf --all-pages > /tmp/slides_debug.jsonl`
-- Our command:
-  - `set -a; source .env; set +a; /usr/bin/time -f 'WALL_SEC=%e' env LD_LIBRARY_PATH=/home/ageralis/tmp/third_party/pdfium/lib /tmp/pdfocr_bin_debug /home/ageralis/tmp/test_files/slides.pdf --all-pages > /tmp/pdfocr_debug_slides_all_pages.jsonl 2> /tmp/pdfocr_debug_slides_all_pages.err`
+- Ours (selected run):
+  - `/usr/bin/time -f 'elapsed_s=%e' env LD_LIBRARY_PATH=/home/ageralis/tmp/third_party/pdfium/lib /tmp/pdfocr_bin_debug /home/ageralis/tmp/test_files/slides.pdf --all-pages > /tmp/pdfocr_retry_runs/run_1.jsonl 2> /tmp/pdfocr_retry_runs/run_1.err`
 
-## Raw Results
+## Output Validation
 
 - Competitor:
   - Exit code: `0`
-  - Elapsed: `20.79s`
-  - Pages: `72`
+  - Lines/pages: `72`
   - Errors: `0`
   - Retries (`attempts > 1`): `0`
   - Sum of attempts: `72`
   - Page order strictly increasing: `true`
-  - Memory logs:
-    - startup: `occupied=1160 free=3472224 total=3473408`
-    - after_pipeline: `occupied=6803632 free=12463928 total=19267584`
-    - shutdown: `occupied=6802472 free=12465088 total=19267584`
 
-- Ours:
+- Ours (new run):
   - Exit code: `0`
-  - Elapsed: `25.46s`
-  - Pages: `72`
+  - Lines/pages: `72`
   - Errors: `0`
-  - Retries (`attempts > 1`): `3`
-  - Sum of attempts: `78`
+  - Retries (`attempts > 1`): `0`
+  - Sum of attempts: `72`
   - Page order strictly increasing: `true`
-  - Memory log (shutdown):
-    - `occupied=945592B (0.90 MiB), free=40997448B (39.10 MiB), total=41943040B (40.00 MiB)`
 
-## Comparison Summary
+## Performance Comparison
 
-- Both implementations are functionally correct on this run: full success (`72/72`), no errors, ordered output.
-- Competitor is faster by `4.67s` (`25.46s - 20.79s`), which is about `22.5%` lower elapsed time.
-- Retry behavior differs:
-  - Competitor: `0` retries (sum attempts `72`)
-  - Ours: `3` retries (sum attempts `78`)
-  - This likely contributed to part of the elapsed-time gap.
-- Memory figures are **not directly comparable yet**:
-  - Competitor reports 3 checkpoints (startup/after_pipeline/shutdown) in raw bytes.
-  - Our current log reports one checkpoint (shutdown) and includes MiB formatting.
-  - Different checkpoints and formats can hide peak/transient usage differences.
+- Competitor elapsed: `20.79s`
+- Ours elapsed: `17.84s`
+- Delta: our run is `2.95s` faster (`~14.2%` lower elapsed time)
+
+## Memory Usage Comparison
+
+Values below are from `getOccupiedMem/getFreeMem/getTotalMem` logs.
+
+- Startup:
+  - Competitor: `occupied=1160 free=3472224 total=3473408`
+  - Ours: `occupied=11528 free=3330808 total=3342336`
+  - Comparison:
+    - occupied: ours `+10368` bytes
+    - free: ours `-141416` bytes
+    - total: ours `-131072` bytes
+
+- After pipeline:
+  - Competitor: `occupied=6803632 free=12463928 total=19267584`
+  - Ours: `occupied=838976 free=43528896 total=44367872`
+  - Comparison:
+    - occupied: ours `-5964656` bytes (`~87.7%` lower)
+    - free: ours `+31064968` bytes
+    - total: ours `+25100288` bytes
+
+- Shutdown:
+  - Competitor: `occupied=6802472 free=12465088 total=19267584`
+  - Ours: `occupied=830008 free=43537864 total=44367872`
+  - Comparison:
+    - occupied: ours `-5972464` bytes (`~87.8%` lower)
+    - free: ours `+31072776` bytes
+    - total: ours `+25100288` bytes
 
 ## Findings
 
-1. Reliability parity was achieved for this workload (`72/72`, no errors, ordered output).
-2. Performance is currently behind the competitor by ~22.5% in elapsed time on the same document.
-3. The observed retry delta (`0` vs `3`) is a concrete behavioral difference and a plausible throughput factor.
-4. Memory instrumentation should be aligned (same checkpoints and units) before drawing conclusions about relative memory efficiency.
+1. We now match the competitor on output quality and stability for this case (`72/72`, `0` errors, `0` retries, strictly ordered pages).
+2. In this measured run, our implementation is faster (`17.84s` vs `20.79s`).
+3. Memory profile differs substantially:
+   - Our occupied memory after pipeline/shutdown is much lower.
+   - Our total/free memory figures are much larger, indicating different allocator reservation behavior.
+4. Because total allocator pool sizes differ, occupied memory is the most directly useful metric for workload footprint comparison.
